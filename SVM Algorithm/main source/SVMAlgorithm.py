@@ -50,17 +50,6 @@ class SVMAlgorithm:
             self.save_model()
             print('[LOG] Model trained and saved successfully')
 
-    def predict(self, count):
-        collection_handler = self.__database_handler.set_collection('tweetsFeatures')
-        raw_predict_dataset = SVMAlgorithm.get_predict_dataset(collection_handler, count)
-        predict_dataset = self.__tfidf_vectorizer.transform(raw_predict_dataset['tweet_text'].values)
-        prediction_list = self.__model.predict(predict_dataset)
-        collection_handler = self.__database_handler.set_collection('tweetsVerdict')
-        object_id_list = raw_predict_dataset['_id'].values
-        count = self.update_database_predictions(collection_handler, prediction_list, object_id_list)
-        if count > 0:
-            print('[LOG] Updated ' + str(count) + ' tweet predictions')
-
     @staticmethod
     def update_database_predictions(collection_handler, prediction_list, object_id_list):
         count = 0
@@ -83,21 +72,26 @@ class SVMAlgorithm:
         return SVMAlgorithm.get_training_dataset(collection_handler)
 
     def synchronize_predictions(self):
+        # conectare la baza de date
+        self.database_connection()
         collection_handler = self.__database_handler.set_collection('tweetsVerdict')
-        cursor = collection_handler.aggregate([{
+        join_cursor = collection_handler.aggregate([{
+            '$match': {'svm_verdict': -1}
+        }, {
             '$lookup': {
                 'from': 'tweetsFeatures',
                 'localField': 'reference',
                 'foreignField': '_id',
-                'as': 'name'
+                'as': 'join'
             }
-        }])
+        }
+        ])
         tweets_text_dataset = []
-        for x in cursor:
-            if x['svm_verdict'] == -1:
-                tweets_text_dataset.append({'tweet_id': x['reference'], 'tweet_text': x['name'][0]['tweet_text']})
-
+        for line in join_cursor:
+            tweets_text_dataset.append({'tweet_id': line['reference'], 'tweet_text': line['join'][0]['tweet_text']})
         if len(tweets_text_dataset) > 0:
+            # posibila modificare collection_handler pentru load din baza de date
+            self.fit_model()
             pd_tweets_text_dataset = pd.DataFrame(tweets_text_dataset)
             predict_dataset = self.__tfidf_vectorizer.transform(pd_tweets_text_dataset['tweet_text'].values)
             prediction_list = self.__model.predict(predict_dataset)
@@ -107,16 +101,24 @@ class SVMAlgorithm:
         else:
             print('[LOG] No unsynced tweet predictions found, you\'re up to date')
 
-    def init(self):
+    def predict(self, count):
         self.database_connection()
+        # posibila modificare collection_handler pentru load din baza de date
         self.fit_model()
-        self.synchronize_predictions()
+        collection_handler = self.__database_handler.set_collection('tweetsFeatures')
+        raw_predict_dataset = SVMAlgorithm.get_predict_dataset(collection_handler, count)
+        print(raw_predict_dataset)
+        predict_dataset = self.__tfidf_vectorizer.transform(raw_predict_dataset['tweet_text'].values)
+        prediction_list = self.__model.predict(predict_dataset)
+        collection_handler = self.__database_handler.set_collection('tweetsVerdict')
+        object_id_list = raw_predict_dataset['_id'].values
+        count = self.update_database_predictions(collection_handler, prediction_list, object_id_list)
+        if count > 0:
+            print('[LOG] Updated ' + str(count) + ' tweet predictions')
+        else:
+            print('[LOG] No unpredicted tweets found!')
 
 
-# put this outside trigger function
 obj = SVMAlgorithm()
-obj.init()
-# next: when signal is recived use obj.predict(count) in trigger function
-
-# to do:
-# - modify model serialization (load, save, model_already_exist)
+# obj.synchronize_predictions()
+obj.predict(5)
