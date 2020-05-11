@@ -61,7 +61,15 @@ class SVMAlgorithm:
 
     @staticmethod
     def get_predict_dataset(collection_handler, count):
-        return pd.DataFrame(collection_handler.find(None, {'tweet_text': 1}).sort('_id', -1).limit(count))
+        tweet_text = collection_handler.find(None, {'full_text': 1, 'retweeted_status': 1}).sort('_id', -1).limit(count)
+        actual_tweet_text = []
+        for line in tweet_text:
+            if 'retweeted_status' in line:
+                tweet_text_string = line['retweeted_status']['full_text']
+            else:
+                tweet_text_string = line['full_text']
+            actual_tweet_text.append({'tweet_id': line['_id'], 'tweet_text': tweet_text_string})
+        return pd.DataFrame(actual_tweet_text)
 
     @staticmethod
     def get_training_dataset(collection_handler):
@@ -74,12 +82,12 @@ class SVMAlgorithm:
     def synchronize_predictions(self):
         # conectare la baza de date
         self.database_connection()
-        collection_handler = self.__database_handler.set_collection('tweetsVerdict')
+        collection_handler = self.__database_handler.set_collection('tweetsVerdict_v1')
         join_cursor = collection_handler.aggregate([{
             '$match': {'svm_verdict': -1}
         }, {
             '$lookup': {
-                'from': 'tweetsFeatures',
+                'from': 'filteredTweets_v1',
                 'localField': 'reference',
                 'foreignField': '_id',
                 'as': 'join'
@@ -88,7 +96,11 @@ class SVMAlgorithm:
         ])
         tweets_text_dataset = []
         for line in join_cursor:
-            tweets_text_dataset.append({'tweet_id': line['reference'], 'tweet_text': line['join'][0]['tweet_text']})
+            if 'retweeted_status' in line['join'][0]:
+                tweet_text_string = line['join'][0]['retweeted_status']['full_text']
+            else:
+                tweet_text_string = line['join'][0]['full_text']
+            tweets_text_dataset.append({'tweet_id': line['reference'], 'tweet_text': tweet_text_string})
         if len(tweets_text_dataset) > 0:
             # posibila modificare collection_handler pentru load din baza de date
             self.fit_model()
@@ -105,13 +117,12 @@ class SVMAlgorithm:
         self.database_connection()
         # posibila modificare collection_handler pentru load din baza de date
         self.fit_model()
-        collection_handler = self.__database_handler.set_collection('tweetsFeatures')
+        collection_handler = self.__database_handler.set_collection('filteredTweets_v1')
         raw_predict_dataset = SVMAlgorithm.get_predict_dataset(collection_handler, count)
-        print(raw_predict_dataset)
         predict_dataset = self.__tfidf_vectorizer.transform(raw_predict_dataset['tweet_text'].values)
         prediction_list = self.__model.predict(predict_dataset)
-        collection_handler = self.__database_handler.set_collection('tweetsVerdict')
-        object_id_list = raw_predict_dataset['_id'].values
+        collection_handler = self.__database_handler.set_collection('tweetsVerdict_v1')
+        object_id_list = raw_predict_dataset['tweet_id'].values
         count = self.update_database_predictions(collection_handler, prediction_list, object_id_list)
         if count > 0:
             print('[LOG] Updated ' + str(count) + ' tweet predictions')
@@ -120,5 +131,5 @@ class SVMAlgorithm:
 
 
 obj = SVMAlgorithm()
-# obj.synchronize_predictions()
-obj.predict(5)
+obj.synchronize_predictions()
+# obj.predict(5)
