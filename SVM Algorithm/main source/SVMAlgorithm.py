@@ -62,14 +62,10 @@ class SVMAlgorithm:
 
     @staticmethod
     def get_predict_dataset(collection_handler, count):
-        tweet_text = collection_handler.find(None, {'full_text': 1, 'retweeted_status': 1}).sort('_id', -1).limit(count)
+        tweet_text = collection_handler.find(None, {'full_text': 1}).sort('_id', -1).limit(count)
         actual_tweet_text = []
         for line in tweet_text:
-            if 'retweeted_status' in line:
-                tweet_text_string = line['retweeted_status']['full_text']
-            else:
-                tweet_text_string = line['full_text']
-            actual_tweet_text.append({'tweet_id': line['_id'], 'tweet_text': tweet_text_string})
+            actual_tweet_text.append({'tweet_id': line['_id'], 'tweet_text': line['full_text']})
         return pd.DataFrame(actual_tweet_text)
 
     @staticmethod
@@ -97,11 +93,7 @@ class SVMAlgorithm:
         ])
         tweets_text_dataset = []
         for line in join_cursor:
-            if 'retweeted_status' in line['join'][0]:
-                tweet_text_string = line['join'][0]['retweeted_status']['full_text']
-            else:
-                tweet_text_string = line['join'][0]['full_text']
-            tweets_text_dataset.append({'tweet_id': line['reference'], 'tweet_text': tweet_text_string})
+            tweets_text_dataset.append({'tweet_id': line['reference'], 'tweet_text': line['join'][0]['full_text']})
         if len(tweets_text_dataset) > 0:
             # posibila modificare collection_handler pentru load din baza de date
             self.fit_model()
