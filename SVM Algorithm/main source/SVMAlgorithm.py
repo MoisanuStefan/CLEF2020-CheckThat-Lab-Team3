@@ -4,6 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from joblib import dump, load
 from os import path
 from MongoDatabase import MongoDatabase
+from Database import update_start_time, update_end_time
 
 
 class SVMAlgorithm:
@@ -114,6 +115,7 @@ class SVMAlgorithm:
             print('[LOG] No unsynced tweet predictions found, you\'re up to date')
 
     def predict(self, count):
+        update_start_time('svm')
         self.database_connection()
         # posibila modificare collection_handler pentru load din baza de date
         self.fit_model()
@@ -128,8 +130,9 @@ class SVMAlgorithm:
             print('[LOG] Updated ' + str(count) + ' tweet predictions')
         else:
             print('[LOG] No unpredicted tweets found!')
+        update_end_time('svm')
 
 
 obj = SVMAlgorithm()
-obj.synchronize_predictions()
-# obj.predict(5)
+# obj.synchronize_predictions()
+obj.predict(5)
