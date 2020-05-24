@@ -4,6 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from MongoDatabase import MongoDatabase
 from Database import update_start_time, update_end_time
 import pickle
+from GridSearch import GridSearch
 
 
 class SVMAlgorithm:
@@ -57,25 +58,41 @@ class SVMAlgorithm:
         training_verdict = raw_training_dataset['verdict'].values
         return training_dataset, training_verdict
 
-    def train_svm(self, training_dataset, training_verdict):
-        # get best params from GridSearchCV if is possible
-        self.__model = SVC(probability=True, kernel='rbf')
+    def train_svm(self, collection_handler, training_dataset, training_verdict):
+        svc_parameters = collection_handler.find_one({'file_name': 'best_svc_parameters'},
+                                                     {'C': 1, 'gamma': 1, 'kernel': 1, '_id': 0})
+        self.__model = SVC(C=svc_parameters['C'], kernel=svc_parameters['kernel'], gamma=svc_parameters['gamma'])
         self.__model.fit(training_dataset, training_verdict)
+
+    @staticmethod
+    def new_train_dataset(collection_handler):
+        return collection_handler.find_one({'file_name': 'gridsearch_check'},
+                                           {'traindata_updated': 1, '_id': 0})['traindata_updated']
 
     def fit_model(self):
         raw_train_dataset = self.process_train_data()
 
         collection_handler = self.database_switcher('Files', 'svmData')
-        result = None
+
+        if not SVMAlgorithm.new_train_dataset(collection_handler):
+            print('[LOG] New training dataset detected, I\'m looking for best parameters...')
+            param_grid = collection_handler.find_one({'file_name': 'possible_svc_parameters'},
+                                                     {'C': 1, 'gamma': 1, 'kernel': 1, '_id': 0})
+            grid_search = GridSearch(param_grid)
+            grid_search.search(collection_handler)
+            grid_search.get_statistics()
+            collection_handler.update_one({'file_name': 'gridsearch_check'}, {"$set": {'traindata_updated': True}})
+            print('[LOG] Best parameters found and saved in database')
 
         print('[LOG] Check if TFIDF Vectorizer exists...')
         if SVMAlgorithm.model_already_exist('tfidf_vectorizer', collection_handler):
             print('[LOG] TFIDF Vectorizer already exists and will be loaded...')
             self.load_model('tfidf_vectorizer', collection_handler)
+            processed_dataset = self.train_tfidf(raw_train_dataset)
             print('[LOG] TFIDF Vectorizer loaded successfully')
         else:
             print('[LOG] TFIDF Vectorizer doesn\'t exist. I begin train procedure...')
-            result = self.train_tfidf(raw_train_dataset)
+            processed_dataset = self.train_tfidf(raw_train_dataset)
             self.save_model('tfidf_vectorizer', collection_handler)
             print('[LOG] TFIDF Vectorizer trained and saved successfully')
 
@@ -86,9 +103,7 @@ class SVMAlgorithm:
             print('[LOG] SVM Model loaded successfully')
         else:
             print('[LOG] SVM Model doesn\'t exist. I begin train procedure...')
-            if result is None:
-                result = self.train_tfidf(raw_train_dataset)
-            self.train_svm(result[0], result[1])
+            self.train_svm(collection_handler, processed_dataset[0], processed_dataset[1])
             self.save_model('svm_model', collection_handler)
             print('[LOG] SVM Model trained and saved successfully')
 
@@ -118,9 +133,10 @@ class SVMAlgorithm:
         return SVMAlgorithm.get_training_dataset(collection_handler)
 
     def synchronize_predictions(self):
-        # conectare la baza de date
         self.database_connection()
         collection_handler = self.database_switcher('Tweets', 'tweetsVerdict_v1')
+
+        collection_handler.update_many({}, {"$set": {"svm_verdict": -1}})
 
         join_cursor = collection_handler.aggregate([{
             '$match': {'svm_verdict': -1}
@@ -151,7 +167,6 @@ class SVMAlgorithm:
     def predict(self, count):
         # update_start_time('svm')
         self.database_connection()
-        # posibila modificare collection_handler pentru load din baza de date
         self.fit_model()
         collection_handler = self.database_switcher('Tweets', 'filteredTweets_v1')
         raw_predict_dataset = SVMAlgorithm.get_predict_dataset(collection_handler, count)

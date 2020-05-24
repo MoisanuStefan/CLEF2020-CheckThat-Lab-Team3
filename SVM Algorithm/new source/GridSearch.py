@@ -1,5 +1,4 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVC
 from MongoDatabase import MongoDatabase
@@ -35,17 +34,17 @@ class GridSearch:
     def grid_fit(self, text_for_train, training_dataset):
         self.__grid.fit(training_dataset, text_for_train['verdict'].values)
         self.__best = self.__grid.best_estimator_
-        print(self.__best)
+        return self.__best
 
     def get_statistics(self):
-        print('Some details about precisiton')
+        print('[LOG] C: ' + str(self.__best.C) + ' | gamma: '
+              + str(self.__best.gamma) + ' | kernel: ' + str(self.__best.kernel))
 
-    def search(self):
+    def search(self, collection_handler):
         raw_dataset = GridSearch.extract_datasets()
         train_dataset = GridSearch.normalize(raw_dataset)
-        self.grid_fit(raw_dataset, train_dataset)
+        best_model = self.grid_fit(raw_dataset, train_dataset)
+        collection_handler.update_one({'file_name': 'best_svc_parameters'},
+                                      {'$set': {'C': best_model.C,
+                                                'kernel': best_model.kernel, 'gamma': best_model.gamma}}, upsert=True)
 
-
-param_grid = {'C': [0.1, 1, 10, 100], 'gamma': [1, 0.1, 0.01, 0.001], 'kernel': ['rbf', 'poly', 'sigmoid']}
-obj = GridSearch(param_grid)
-obj.search()
